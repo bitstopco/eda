@@ -3,6 +3,7 @@ require "msgpack"
 require "uuid"
 
 require "../ext/uuid/msgpack"
+require "../ext/class/to_redis_key"
 require "../channel"
 
 module Onyx::EDA
@@ -62,7 +63,7 @@ module Onyx::EDA
         events.each do |event|
           tx.send(
             "XADD",
-            "#{@namespace}:#{event.class.to_s.split("::").map(&.underscore).join('-')}",
+            "#{@namespace}:#{event.class.to_redis_key}",
             "*",
             "pld",
             event.to_msgpack,
@@ -74,35 +75,32 @@ module Onyx::EDA
     end
 
     # See `Channel#subscribe`.
-    def subscribe(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
-      changed = super(object, event, &proc)
-      unblock_client unless changed.empty?
-      changed.map { |k| event_redis_key(k) }
+    def subscribe(object, event : T.class, &proc : T -> Nil) : Proc forall T
+      wrap_changes do
+        super(object, event, &proc)
+      end
     end
 
     # See `Channel#unsubscribe`.
-    def unsubscribe(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
-      changed = super
-      unblock_client unless changed.empty?
-      changed.map { |k| event_redis_key(k) }
+    def unsubscribe(*args, &proc) : Int32
+      wrap_changes do
+        super
+      end
     end
 
     # ditto
-    def unsubscribe(object, event : T.class) : Enumerable(String) forall T
-      changed = super
-      unblock_client unless changed.empty?
-      changed.map { |k| event_redis_key(k) }
+    def unsubscribe(*args) : Int32 forall T
+      wrap_changes do
+        super
+      end
     end
 
-    # ditto
-    def unsubscribe(object) : Enumerable(String)
-      changed = super
-      unblock_client unless changed.empty?
-      changed.map { |k| event_redis_key(k) }
-    end
-
-    protected def event_redis_key(klass : String)
-      klass.split("::").map(&.underscore).join('-')
+    protected def wrap_changes(&block)
+      before = @subscriptions.keys
+      result = yield
+      after = @subscriptions.keys
+      unblock_client if before != after
+      return result
     end
 
     protected def routine
@@ -116,7 +114,9 @@ module Onyx::EDA
 
       loop do
         # Dupping the `#events_to_subscribe` array because it can change in runtime
-        streams = @subscriptions.keys.map(&.split("::").map(&.underscore).join('-'))
+        streams = @subscriptions.keys.map do |hash|
+          hash_to_event_type(hash).to_redis_key
+        end
 
         if streams.empty?
           # If there are no events to subscribe to, then just block

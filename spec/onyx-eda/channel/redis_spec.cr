@@ -103,4 +103,14 @@ describe Onyx::EDA::Channel::Redis do
       invocations_hash[Onyx::EDA::Event].should eq 3
     end
   end
+
+  describe "#unsubscribe" do
+    it do
+      channel.unsubscribe(Object, UserEvent).should eq(7)
+    end
+
+    it do
+      channel.unsubscribe(Object).should eq(2)
+    end
+  end
 end

@@ -10,6 +10,10 @@ class NewUserNotifier
   end
 end
 
+class Onyx::EDA::Channel
+  getter subscriptions
+end
+
 describe Onyx::EDA::Channel do
   channel = Onyx::EDA::Channel.new
 
@@ -31,42 +35,57 @@ describe Onyx::EDA::Channel do
 
   describe "#subscribe" do
     context "when new event" do
-      it "returns array with added event names" do
-        channel.subscribe(Object, UserEvent, &user_event_proc).should eq ["Users::Created", "Users::Deleted"]
+      it "returns proc" do
+        channel.subscribe(Object, UserEvent, &user_event_proc).should eq(user_event_proc)
       end
 
-      it "returns array with added event names" do
-        channel.subscribe(Object, SomeOtherEvent) do |event|
+      # Internal specs
+      it "updates subscriptions" do
+        channel.subscriptions.size.should eq(2)
+
+        subhash = {Object.hash => [{UserEvent.hash, user_event_proc.pointer, user_event_proc.closure_data}].to_set}
+
+        channel.subscriptions[Users::Created.hash].should eq(subhash)
+        channel.subscriptions[Users::Deleted.hash].should eq(subhash)
+      end
+
+      temp_proc = nil
+
+      it "returns proc" do
+        temp_proc = channel.subscribe(Object, SomeOtherEvent) do |event|
           a, b = event.class, event.foo
           invocations_hash[SomeOtherEvent] += 1
-        end.should eq ["SomeOtherEvent"]
+        end
+
+        temp_proc.should be_a(Proc(SomeOtherEvent, Nil))
+      end
+
+      # Internal specs
+      it "updates subscriptions" do
+        channel.subscriptions.size.should eq(3)
+
+        subhash = {Object.hash => [{SomeOtherEvent.hash, temp_proc.not_nil!.pointer, temp_proc.not_nil!.closure_data}].to_set}
+
+        channel.subscriptions[SomeOtherEvent.hash].should eq(subhash)
       end
     end
+  end
 
-    notifier = NewUserNotifier.new(channel, invocations_hash)
+  notifier = NewUserNotifier.new(channel, invocations_hash)
 
-    context "when existing event" do
-      it "returns empty array" do
-        channel.subscribe(Object, UserEvent) do |event|
-          a, b = event.class, event.id
-          invocations_hash["AnotherUserEvent"] += 1
-        end.should be_empty
-      end
+  channel.subscribe(Object, UserEvent) do |event|
+    a, b = event.class, event.id
+    invocations_hash["AnotherUserEvent"] += 1
+  end
 
-      it "returns empty array" do
-        channel.subscribe(Object, Users::Deleted) do |event|
-          a, b, c = event.class, event.id, event.reason
-          invocations_hash[Users::Deleted] += 1
-        end.should be_empty
-      end
+  channel.subscribe(Object, Users::Deleted) do |event|
+    a, b, c = event.class, event.id, event.reason
+    invocations_hash[Users::Deleted] += 1
+  end
 
-      it "returns empty array" do
-        channel.subscribe(Object, Onyx::EDA::Event) do |event|
-          a = event.class
-          invocations_hash[Onyx::EDA::Event] += 1
-        end.should be_empty
-      end
-    end
+  channel.subscribe(Object, Onyx::EDA::Event) do |event|
+    a = event.class
+    invocations_hash[Onyx::EDA::Event] += 1
   end
 
   describe "emitting Users::Created event" do
@@ -180,8 +199,8 @@ describe Onyx::EDA::Channel do
 
   context "when unsubscribed Object by UserEvent by proc" do
     describe "#unsubscribe" do
-      it "returns empty array" do
-        channel.unsubscribe(Object, UserEvent, &user_event_proc).should be_empty
+      it "returns number of unsubscribed procs" do
+        channel.unsubscribe(Object, UserEvent, &user_event_proc).should eq(2)
       end
     end
 
@@ -210,8 +229,8 @@ describe Onyx::EDA::Channel do
 
   context "when unsubscribed Object by UserEvent" do
     describe "#unsubscribe" do
-      it "returns array of removed event keys" do
-        channel.unsubscribe(Object, UserEvent).should eq ["Users::Deleted"]
+      it "returns number of unsubscribed procs" do
+        channel.unsubscribe(Object, UserEvent).should eq(5)
       end
     end
 
@@ -245,8 +264,8 @@ describe Onyx::EDA::Channel do
 
   context "when unsubscribed Object" do
     describe "#unsubscribe" do
-      it "returns array of removed event keys" do
-        channel.unsubscribe(Object).should eq ["SomeOtherEvent"]
+      it "returns number of unsubscribed procs" do
+        channel.unsubscribe(Object).should eq(2)
       end
     end
 
@@ -279,8 +298,8 @@ describe Onyx::EDA::Channel do
 
   context "when unsubscribed NewUserNotifier" do
     describe "#unsubscribe" do
-      it "returns array of removed event keys" do
-        channel.unsubscribe(notifier).should eq ["Users::Created"]
+      it "returns number of unsubscribed procs" do
+        channel.unsubscribe(notifier).should eq(1)
       end
     end
 

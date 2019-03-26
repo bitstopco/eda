@@ -28,17 +28,15 @@ module Onyx::EDA
     end
 
     # Subscribe an *object* to *event*, calling *proc* on event emit.
+    # Immediately returns the given proc, which could be used on `#unsubscribe`.
     #
     # Channel distinguishes subscribers by their `object.hash`.
     # You can have a single object subscribed to multiple events with multiple procs.
     # You can specify an abstract object, as well as a module in addition to
     # standard class and struct as *event*.
     #
-    # Returns an array of the **newly** added event class names to watch,
-    # skipping those which already have *at least one* subscriber.
-    #
     # BUG: You currently can not pass a `Union` as an *event* argument.
-    # Please subscribe multiple times with different events instead.
+    # Please use module or abstract object instead.
     #
     # ```
     # abstract struct AppEvent < Onyx::EDA::Event
@@ -53,11 +51,11 @@ module Onyx::EDA
     #
     # channel.subscribe(Object, AppEvent) do |event|
     #   pp event.foo
-    # end # => ["MyEvent"]
+    # end
     #
     # channel.subscribe(Object, MyEvent) do |event|
     #   pp event.foo
-    # end # => []
+    # end
     #
     # channel.emit(MyEvent.new("bar")) # Will print "bar" two times
     # ```
@@ -83,7 +81,7 @@ module Onyx::EDA
     # # Or
     # notifier.stop
     # ```
-    def subscribe(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
+    def subscribe(object, event : T.class, &proc : T -> Nil) : Proc forall T
       add_subscription(object, event, &proc)
     end
 
@@ -92,9 +90,7 @@ module Onyx::EDA
     #
     # NOTE: You should pass exactly the same proc object.
     # `ProcNotSubscribedError` is raised otherwise.
-    #
-    # Returns an array of event class names which are not watched anymore,
-    # i.e. those which have *zero* subscribers after this method call.
+    # Returns number of unique unsubscribed procs.
     #
     # ```
     # proc = ->(e : MyEvent) { pp e }
@@ -107,151 +103,149 @@ module Onyx::EDA
     # end
     #
     # # OK
-    # channel.unsubscribe(Object, MyEvent, &proc) # => ["MyEvent"]
+    # channel.unsubscribe(Object, MyEvent, &proc) # => {MyEvent => [proc]}
     # ```
-    def unsubscribe(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
-      remove_subscription(object, event, &proc)
+    #
+    # You can also make use of the fact that `#subscribe` returns a proc object:
+    #
+    # ```
+    # proc = channel.subscribe(Object, MyEvent) do |event|
+    #   pp event
+    # end
+    #
+    # channel.unsubscribe(Object, MyEvent, proc) # => {MyEvent => [proc]}
+    # ```
+    def unsubscribe(object, event : T.class, &proc : T -> Nil) : Int32 forall T
+      remove_subscriptions(object, event, &proc)
     end
 
     # Unsubscribe an *object* from all *event* notifications.
-    #
-    # Returns an array of event class names which are not watched anymore,
-    # i.e. those which have *zero* subscribers after this method call.
+    # Returns number of unique unsubscribed procs.
     #
     # ```
     # channel.subscribe(Object, MyEvent) do |event|
     #   pp event
     # end
     #
-    # channel.unsubscribe(Object, MyEvent) # => ["MyEvent"]
+    # channel.unsubscribe(Object, AppEvent) # => {MyEvent => [#<Proc(MyEvent, Nil)>]}
     # ```
-    def unsubscribe(object, event : T.class) : Enumerable(String) forall T
-      remove_subscription(object, event)
+    def unsubscribe(object, event : T.class) : Int32 forall T
+      remove_subscriptions(object, event)
     end
 
     # Unsubscribe an *object* from all events.
-    #
-    # Returns an array of event class names which are not watched anymore,
-    # i.e. those which have *zero* subscribers after this method call.
+    # Returns number of unique unsubscribed procs.
     #
     # ```
     # channel.subscribe(Object, MyEvent) do |event|
     #   pp event
     # end
     #
-    # channel.unsubscribe(Object) # => ["MyEvent"]
+    # channel.unsubscribe(Object) # => {MyEvent =>[#<Proc(MyEvent, Nil)>]}
     # ```
-    def unsubscribe(object) : Enumerable(String)
-      remove_subscription(object)
+    def unsubscribe(object) : Int32
+      remove_subscriptions(object)
     end
 
-    @subscriptions : Hash(String, Hash(UInt64, Set(Tuple(String, Void*, Void*)))) = Hash(String, Hash(UInt64, Set(Tuple(String, Void*, Void*)))).new
+    @subscriptions : Hash(UInt64, Hash(UInt64, Set(Tuple(UInt64, Void*, Void*)))) = Hash(UInt64, Hash(UInt64, Set(Tuple(UInt64, Void*, Void*)))).new
 
-    protected def add_subscription(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
+    protected def add_subscription(object, event : T.class, &proc : T -> Nil) : Proc forall T
       {%
         descendants = Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) }
         raise "#{T} has no descendants" if descendants.empty?
       %}
 
-      tuple = { {{T.stringify}}, proc.pointer, proc.closure_data }
+      tuple = {event.hash, proc.pointer, proc.closure_data}
       object_hash = object.hash
 
-      event_keys_added = Array(String).new
-
-      {% for object in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
-        unless hash = @subscriptions[{{object.stringify}}]?
-          hash = Hash(UInt64, Set(Tuple(String, Void*, Void*))).new
-          @subscriptions[{{object.stringify}}] = hash
-          event_keys_added << {{object.stringify}}
+      {% for event_class in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
+        unless hash = @subscriptions[{{event_class}}.hash]?
+          hash = Hash(UInt64, Set(Tuple(UInt64, Void*, Void*))).new
+          @subscriptions[{{event_class}}.hash] = hash
         end
 
         unless set = hash[object_hash]?
-          set = Set(Tuple(String, Void*, Void*)).new
+          set = Set(Tuple(UInt64, Void*, Void*)).new
           hash[object_hash] = set
         end
 
-        unless set.includes?(tuple)
-          set << tuple
-        end
+        set << tuple
       {% end %}
 
-      return event_keys_added
+      return proc
     end
 
-    protected def remove_subscription(object, event : T.class, &proc : T -> Nil) : Enumerable(String) forall T
+    protected def remove_subscriptions(
+      object, event : T.class, &proc : T -> Nil
+    ) : Int32 forall T
       {%
         descendants = Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) }
         raise "#{T} has no descendants" if descendants.empty?
       %}
 
-      tuple = { {{T.stringify}}, proc.pointer, proc.closure_data }
+      tuple = {event.hash, proc.pointer, proc.closure_data}
       object_hash = object.hash
+      removed_counter = 0
 
-      anything_removed = false
-      event_keys_removed = Array(String).new
-
-      {% for object in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
-        if hash = @subscriptions[{{object.stringify}}]?
+      {% for event_class in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
+        if hash = @subscriptions[{{event_class}}.hash]?
           if proc_set = hash[object_hash]?
             if proc_set.includes?(tuple)
               proc_set.delete(tuple)
-              anything_removed = true
+              removed_counter += 1
 
               if proc_set.empty?
-                hash[object_hash].delete(proc_set)
-
-                if hash.empty?
-                  @subscriptions.delete({{object.stringify}})
-                  event_keys_removed << {{object.stringify}}
-                end
+                hash.delete(object_hash)
               end
             end
           end
         end
       {% end %}
 
-      raise ProcNotSubscribedError.new(proc) unless anything_removed
-      return event_keys_removed
+      raise ProcNotSubscribedError.new(proc) unless removed_counter > 0
+      return removed_counter
     end
 
-    protected def remove_subscription(object, event : T.class) : Enumerable(String) forall T
+    protected def remove_subscriptions(object, event : T.class) : Int32 forall T
       {%
         descendants = Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) }
         raise "#{T} has no descendants" if descendants.empty?
       %}
 
       object_hash = object.hash
-      event_keys_removed = Array(String).new
+      removed_counter = 0
 
-      {% for object in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
-        if hash = @subscriptions[{{object.stringify}}]?
-          removed = hash.delete(object_hash)
-
-          if hash.empty?
-            @subscriptions.delete({{object.stringify}})
-            event_keys_removed << {{object.stringify}}
+      {% for event_class in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) && !t.abstract? } %}
+        if hash = @subscriptions[{{event_class}}.hash]?
+          if proc_set = hash.delete(object_hash)
+            removed_counter += proc_set.size
           end
         end
       {% end %}
 
-      return event_keys_removed
+      return removed_counter
     end
 
-    protected def remove_subscription(object) : Enumerable(String)
+    protected def remove_subscriptions(object) : Int32
       object_hash = object.hash
+      removed_counter = 0
 
-      event_keys_removed = Array(String).new
-
-      @subscriptions.each do |event, hash|
-        removed = hash.delete(object_hash)
-
-        if hash.empty?
-          @subscriptions.delete(event)
-          event_keys_removed << event
-        end
+      @subscriptions.each do |event_class_hash, hash|
+        {% begin %}
+          case event_class_hash
+          {% for event_class in Object.all_subclasses.select { |t| t <= Onyx::EDA::Event && (t < Reference || t < Struct) && !t.abstract? } %}
+            when {{event_class}}.hash
+              if set = hash.delete(object_hash)
+                removed_counter += set.size
+              end
+          {% end %}
+          else
+            raise "BUG: Hash didn't match any event class"
+          end
+        {% end %}
       end
 
-      return event_keys_removed
+      return removed_counter
     end
 
     protected def notify(event : T) : Nil forall T
@@ -261,21 +255,35 @@ module Onyx::EDA
       %}
 
       {% for object in Object.all_subclasses.select { |t| t <= T && (t < Reference || t < Struct) } %}
-        @subscriptions[{{object.stringify}}]?.try do |hash|
+        @subscriptions[{{object}}.hash]?.try do |hash|
           hash.each do |_, proc_set|
-            proc_set.each do |(type, pointer, closure_data)|
+            proc_set.each do |(hash, pointer, closure_data)|
               {% begin %}
-                case type
+                case hash
                 {% for type in (Class.all_subclasses.select { |t| t.instance >= T && !(t.instance <= Object) }.map(&.instance) + Object.all_subclasses.select { |t| t >= T && (t < Reference || t < Struct) }).uniq %}
-                  when {{type.stringify}}
+                  when {{type}}.hash
                     spawn Proc({{type}}, Nil).new(pointer, closure_data).call(event.as({{type}}))
                 {% end %}
                 else
-                  raise "BUG: Unmatched event type #{type}"
+                  raise "BUG: Hash didn't match any event type"
                 end
               {% end %}
             end
           end
+        end
+      {% end %}
+    end
+
+    # Cast UInt64 *hash* to an event type or raise.
+    protected def hash_to_event_type(hash : UInt64)
+      {% begin %}
+        case hash
+        {% for event_type in (Class.all_subclasses.select { |t| t.instance >= Onyx::EDA::Event && !(t.instance <= Object) }.map(&.instance) + Object.all_subclasses.select { |t| t <= Onyx::EDA::Event && (t < Reference || t < Struct) }).uniq %}
+          when {{event_type}}.hash
+            return {{event_type}}
+        {% end %}
+        else
+          raise "BUG: Hash didn't match any event type"
         end
       {% end %}
     end
