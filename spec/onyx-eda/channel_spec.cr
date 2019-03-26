@@ -70,7 +70,13 @@ describe Onyx::EDA::Channel do
   end
 
   describe "emitting Users::Created event" do
-    spawn channel.emit(Users::Created.new(42))
+    describe "#emit" do
+      it "returns events" do
+        events = channel.emit(Users::Created.new(42))
+        events.should be_a(Tuple(Users::Created))
+        events.first.event_id.should be_a(UUID)
+      end
+    end
 
     sleep(0.01)
 
@@ -210,7 +216,12 @@ describe Onyx::EDA::Channel do
     end
 
     describe "emitting Users::Created event" do
-      spawn channel.emit(Users::Created.new(42), Users::Created.new(42))
+      describe "#emit with multiple events" do
+        it "returns multiple events" do
+          events = channel.emit(Users::Created.new(42), Users::Created.new(42))
+          events.should be_a(Tuple(Users::Created, Users::Created))
+        end
+      end
 
       sleep(0.01)
 

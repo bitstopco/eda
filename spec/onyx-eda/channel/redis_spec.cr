@@ -41,8 +41,10 @@ describe Onyx::EDA::Channel::Redis do
   end
 
   describe "#emit" do
-    it do
-      channel.emit(Users::Created.new(42)).should_not be_empty
+    it "returns events" do
+      events = channel.emit(Users::Created.new(42))
+      events.should be_a(Tuple(Users::Created))
+      events.first.event_id.should be_a(UUID)
     end
   end
 
@@ -70,9 +72,11 @@ describe Onyx::EDA::Channel::Redis do
     end
   end
 
-  describe "#emit" do
-    it do
-      channel.emit(Users::Deleted.new(42, "migrated"), SomeOtherEvent.new("bar")).should_not be_empty
+  describe "#emit with multiple events" do
+    it "returns multiple events" do
+      events = channel.emit(Users::Deleted.new(42, "migrated"), SomeOtherEvent.new("bar"))
+      events.should be_a(Tuple(Users::Deleted, SomeOtherEvent))
+      events.first.event_id.should be_a(UUID)
     end
   end
 

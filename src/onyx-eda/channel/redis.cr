@@ -2,6 +2,7 @@ require "mini_redis"
 require "msgpack"
 require "uuid"
 
+require "../ext/uuid/msgpack"
 require "../channel"
 
 module Onyx::EDA
@@ -56,7 +57,7 @@ module Onyx::EDA
     end
 
     # See `Channel#emit`.
-    def emit(events : Enumerable(T)) forall T
+    def emit(events : Enumerable(T)) : Enumerable(T) forall T
       response = @sidekick.transaction do |tx|
         events.each do |event|
           tx.send(
@@ -69,7 +70,7 @@ module Onyx::EDA
         end
       end
 
-      response.raw.as(Array).map { |v| String.new(v.raw.as(Bytes)) }
+      events
     end
 
     # See `Channel#subscribe`.

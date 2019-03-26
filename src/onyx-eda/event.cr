@@ -1,3 +1,5 @@
+require "uuid"
+
 # A basic event module to include.
 #
 # According to [Wikipedia](https://en.wikipedia.org/wiki/Event-driven_architecture#Event_flow_layers):
@@ -20,11 +22,17 @@
 #   puts event.foo
 # end
 #
-# spawn channel.send(MyEvent.new)
+# event = channel.emit(MyEvent.new)
+# pp event.event_id # => <UUID>
 #
 # sleep # You need to yield the control, see more in Channel docs
 # ```
 module Onyx::EDA::Event
+  @event_id : UUID = UUID.random
+
+  # This event ID. Defaults to a random `UUID`.
+  getter event_id : UUID
+
   macro included
     {% unless @type < Struct || @type < Reference %}
       {% raise "Cannot include Onyx::EDA::Event to a module yet. Make #{@type} an abstract struct or class instead" %}

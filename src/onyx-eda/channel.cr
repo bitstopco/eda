@@ -11,16 +11,20 @@ module Onyx::EDA
   # sleep(0.01) # Need to yield the control, because all notifications are async
   # ```
   class Channel
-    # Emit *events*, notifying all its subscribers.
-    def emit(*events : *T) forall T
+    # Emit *events*, notifying all its subscribers (i.e. calling procs).
+    # Procs are called asynchronously, therefore need to yield control after `#emit`.
+    # Returns these events themselves.
+    def emit(*events : *T) : T forall T
       emit(events)
     end
 
     # ditto
-    def emit(events : Enumerable(T)) forall T
+    def emit(events : Enumerable(T)) : Enumerable(T) forall T
       events.each do |event|
         notify(event)
       end
+
+      events
     end
 
     # Subscribe an *object* to *event*, calling *proc* on event emit.
