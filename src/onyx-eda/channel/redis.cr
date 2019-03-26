@@ -75,9 +75,9 @@ module Onyx::EDA
     end
 
     # See `Channel#subscribe`.
-    def subscribe(object, event : T.class, &proc : T -> Nil) : Proc forall T
+    def subscribe(object, event : T.class, **filter : **U, &proc : T -> Nil) : Proc forall T, U
       wrap_changes do
-        super(object, event, &proc)
+        super(object, event, **filter, &proc)
       end
     end
 

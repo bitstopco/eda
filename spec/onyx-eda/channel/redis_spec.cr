@@ -113,4 +113,48 @@ describe Onyx::EDA::Channel::Redis do
       channel.unsubscribe(Object).should eq(2)
     end
   end
+
+  describe "#await" do
+    it do
+      spawn do
+        channel.emit(Users::Created.new(42))
+      end
+
+      event = channel.await(Users::Created)
+      event.id.should eq 42
+    end
+
+    context "with filter" do
+      it do
+        spawn do
+          channel.emit(Users::Created.new(43))
+        end
+
+        event = channel.await(UserEvent, id: 43)
+        event.id.should eq 43
+      end
+    end
+
+    context "with block" do
+      it do
+        spawn do
+          channel.emit(Users::Created.new(44))
+        end
+
+        id = channel.await(Users::Created, &.id)
+        id.should eq 44
+      end
+    end
+
+    context "with block and filter" do
+      it do
+        spawn do
+          channel.emit(Users::Created.new(45))
+        end
+
+        id = channel.await(UserEvent, id: 45, &.id)
+        id.should eq 45
+      end
+    end
+  end
 end

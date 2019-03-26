@@ -81,8 +81,51 @@ module Onyx::EDA
     # # Or
     # notifier.stop
     # ```
-    def subscribe(object, event : T.class, &proc : T -> Nil) : Proc forall T
-      add_subscription(object, event, &proc)
+    #
+    # You can filter the events with the *filter* argument. Each filter will be
+    # converted to event getter call, so it must answer to it.
+    #
+    # ```
+    # struct MyEvent
+    #   include Onyx::EDA::Event
+    #
+    #   getter id : Int32
+    #
+    #   def initialize(@id : Int32)
+    #   end
+    # end
+    #
+    # channel.subscribe(Object, MyEvent, id: 42) do |event|
+    #   puts "Will be called only if event.id == 42"
+    # end
+    #
+    # channel.subscribe(Object, MyEvent, unknown: "foo") # Compilation-time error
+    # ```
+    #
+    # Each call with filter returns an unique proc wrapping the input proc.
+    #
+    # ```
+    # proc = ->(e : MyEvent) { pp e }
+    #
+    # proc_1 = channel.subscribe(Object, MyEvent, id: 42, &proc)
+    # proc_2 = channel.subscribe(Object, MyEvent, id: 42, &proc)
+    #
+    # pp proc_1 == proc_2 # => false
+    # ```
+    def subscribe(object, event klass : T.class, **filter : **U, &proc : T -> Nil) : Proc forall T, U
+      _proc = proc
+
+      {% if U.size == 0 %}
+        add_subscription(object, T, &_proc)
+      {% else %}
+        add_subscription(object, T) do |event|
+          {% for k, v in U %}
+            next unless event.{{k.id}} == filter[{{k.symbolize}}].as({{v}})
+          {% end %}
+
+          _proc.call(event)
+        end
+      {% end %}
     end
 
     # Unsubscribe an *object* from *event* notifications by *proc*.
@@ -145,6 +188,108 @@ module Onyx::EDA
     # ```
     def unsubscribe(object) : Int32
       remove_subscriptions(object)
+    end
+
+    # Block unless *event* is received with optional *filter*. Returns the event.
+    #
+    # ```
+    # event = channel.await(MyEvent)
+    #
+    # # Or with filtering
+    # event = channel.await(MyEvent, id: 42)
+    # ```
+    #
+    # It can also be used in `select`:
+    #
+    # ```
+    # select
+    # when event = channel.await(MyEvent, id: 42)
+    #   puts event.content
+    # when Timeout.new(30.seconds)
+    #   raise "Timeout!"
+    # end
+    # ```
+    def await(event : T.class, **filter : **U) : T forall T, U
+      channel = ::Channel(T).new(1)
+
+      proc = subscribe(Object, T, **filter) do |event|
+        channel.send(event)
+      end
+
+      event = channel.receive
+      unsubscribe(Object, T, &proc)
+
+      return event
+    end
+
+    # Block unless *event* is received with optional *filter*.
+    # Returns the *block* execution result.
+    #
+    # ```
+    # content = channel.await(MyEvent) do |event|
+    #   event.content
+    # end
+    #
+    # # Or with filtering
+    # content = channel.await(MyEvent, id: 42, &.content)
+    # ```
+    #
+    # It can also be used in `select`:
+    #
+    # ```
+    # select
+    # when content = channel.await(MyEvent, id: 42, &.content)
+    #   puts content
+    # when Timeout.new(30.seconds)
+    #   raise "Timeout!"
+    # end
+    # ```
+    def await(event : T.class, **filter : **U, &block : T -> V) : V forall T, U, V
+      yield(await(event, **filter))
+    end
+
+    # :nodoc:
+    def await_select_action(event klass : T.class, **filter : **U) forall T, U
+      unsubscribe_channel = ::Channel(Nil).new(1)
+      event_channel = ::Channel(T).new(1)
+      done = false
+
+      proc = subscribe(Object, T, **filter) do |event|
+        next if done
+        done = true
+
+        unsubscribe_channel.send(nil)
+        event_channel.send(event)
+      end
+
+      spawn do
+        unsubscribe_channel.receive
+        unsubscribe(Object, T, &proc)
+      end
+
+      return event_channel.receive_select_action
+    end
+
+    # :nodoc:
+    def await_select_action(event klass : T.class, **filter : **U, &block : T -> V) forall T, U, V
+      unsubscribe_channel = ::Channel(Nil).new(1)
+      result_channel = ::Channel(V).new(1)
+      done = false
+
+      proc = subscribe(Object, T, **filter) do |event|
+        next if done
+        done = true
+
+        unsubscribe_channel.send(nil)
+        result_channel.send(block.call(event))
+      end
+
+      spawn do
+        unsubscribe_channel.receive
+        unsubscribe(Object, T, &proc)
+      end
+
+      return result_channel.receive_select_action
     end
 
     @subscriptions : Hash(UInt64, Hash(UInt64, Set(Tuple(UInt64, Void*, Void*)))) = Hash(UInt64, Hash(UInt64, Set(Tuple(UInt64, Void*, Void*)))).new
