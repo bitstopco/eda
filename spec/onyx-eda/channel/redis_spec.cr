@@ -127,6 +127,7 @@ describe Onyx::EDA::Channel::Redis do
     context "with filter" do
       it do
         spawn do
+          sleep(0.1)
           channel.emit(Users::Created.new(43))
         end
 
@@ -138,6 +139,7 @@ describe Onyx::EDA::Channel::Redis do
     context "with block" do
       it do
         spawn do
+          sleep(0.1)
           channel.emit(Users::Created.new(44))
         end
 
@@ -149,6 +151,7 @@ describe Onyx::EDA::Channel::Redis do
     context "with block and filter" do
       it do
         spawn do
+          sleep(0.1)
           channel.emit(Users::Created.new(45))
         end
 
