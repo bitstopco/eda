@@ -6,6 +6,24 @@ require "../ext/uuid/msgpack"
 require "../ext/class/to_redis_key"
 require "../channel"
 
+{% for object in Object.all_subclasses.select { |t| t <= Onyx::EDA::Event && (t < Reference) } %}
+  class {{object}}
+    include MessagePack::Serializable
+  end
+{% end %}
+
+{% for type in Object.all_subclasses.select { |t| t <= Onyx::EDA::Event } %}
+  {% if type < Struct %}
+    struct {{type}}
+      include MessagePack::Serializable
+    end
+  {% elsif type < Reference %}
+    class {{type}}
+      include MessagePack::Serializable
+    end
+  {% end %}
+{% end %}
+
 module Onyx::EDA
   module Event
     macro included

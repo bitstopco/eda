@@ -1,6 +1,6 @@
 require "../../spec_helper"
-require "../../../src/onyx-eda/channel/redis"
 require "../../events"
+require "../../../src/onyx-eda/channel/redis"
 
 describe Onyx::EDA::Channel::Redis do
   channel = Onyx::EDA::Channel::Redis.new(ENV["REDIS_URL"])
