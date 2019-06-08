@@ -68,7 +68,7 @@ module Onyx::EDA
       @sidekick : MiniRedis = MiniRedis.new,
       @namespace : String = "onyx-eda"
     )
-      @client_id = @redis.command("CLIENT ID").raw.as(Int64)
+      @client_id = @redis.send("CLIENT", "ID").raw.as(Int64)
 
       spawn do
         routine
@@ -142,7 +142,7 @@ module Onyx::EDA
 
           begin
             @blocked = true
-            @redis.command("BLPOP #{UUID.random} 0")
+            @redis.send("BLPOP", UUID.random.to_s, 0)
           rescue ex : MiniRedis::Error
             if ex.message =~ /^UNBLOCKED/
               next @blocked = false
@@ -154,18 +154,18 @@ module Onyx::EDA
 
         # Update the client name so others know which streams is this client reading
         @redis.pipeline do |pipe|
-          pipe.send("CLIENT SETNAME #{@namespace}:channel:#{streams.join(',')}")
+          pipe.send("CLIENT", "SETNAME", {@namespace, ":channel:", streams.join(',')})
         end
 
         loop do
           begin
             @blocked = true
 
-            response = @redis.command(
-              "XREAD COUNT 1 BLOCK 0 STREAMS " +
-              streams.map { |s| "#{@namespace}:#{s}" }.join(' ') + ' ' +
-              streams.map { |s| last_read_ids.fetch(s) { now } }.join(' ')
-            )
+            commands = ["XREAD", "COUNT", 1, "BLOCK", 0, "STREAMS"] +
+                       streams.map { |s| "#{@namespace}:#{s}" } +
+                       streams.map { |s| last_read_ids.fetch(s) { now } }
+
+            response = @redis.send(commands)
           rescue ex : MiniRedis::Error
             if ex.message =~ /^UNBLOCKED/
               break @blocked = false
@@ -211,7 +211,7 @@ module Onyx::EDA
 
     # Unblock the subscribed client.
     protected def unblock_client
-      @sidekick.command("CLIENT UNBLOCK #{@client_id} ERROR") if @blocked
+      @sidekick.send("CLIENT", "UNBLOCK", @client_id, "ERROR") if @blocked
     end
   end
 end
