@@ -10,8 +10,10 @@ license: MIT
 
 dependencies:
   mini_redis:
-    github: vladfaust/mini_redis
-    version: ~> 0.2.0
+    github: bitstopco/mini_redis
+#     github: vladfaust/mini_redis
+#     version: ~> 0.2.0
+    branch: auth
   msgpack:
     github: crystal-community/msgpack-crystal
     version: ~> 0.14.0
